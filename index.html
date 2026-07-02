@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Registro de Cliente Nuevo</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 24px;
+      max-width: 520px;
+      margin: auto;
+      background: #f5f7fb;
+      color: #202124;
+    }
+
+    .card {
+      background: white;
+      padding: 24px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    }
+
+    h2 {
+      margin-top: 0;
+    }
+
+    button, a.boton {
+      width: 100%;
+      box-sizing: border-box;
+      display: block;
+      text-align: center;
+      padding: 14px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      background: #1a73e8;
+      color: white;
+      cursor: pointer;
+      text-decoration: none;
+      margin-top: 16px;
+    }
+
+    a.boton {
+      background: #188038;
+    }
+
+    .estado {
+      margin-top: 18px;
+      line-height: 1.5;
+      font-size: 15px;
+    }
+
+    .error {
+      color: #b00020;
+      font-weight: bold;
+    }
+
+    .nota {
+      font-size: 13px;
+      color: #5f6368;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="card">
+    <h2>Registro de cliente nuevo</h2>
+
+    <p>
+      Presiona el botón para capturar la ubicación del cliente.
+      Luego se abrirá el formulario con longitud, latitud y coordenadas ya llenas.
+    </p>
+
+    <button onclick="capturarUbicacion()">
+      Capturar ubicación y abrir formulario
+    </button>
+
+    <div id="estado" class="estado"></div>
+
+    <a id="botonFormulario"
+       class="boton"
+       href="#"
+       style="display:none;">
+      Abrir formulario manualmente
+    </a>
+
+    <p class="nota">
+      Si el teléfono solicita permiso de ubicación, debes aceptar para continuar.
+    </p>
+  </div>
+
+  <script>
+    const FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSdHklQnP509a296rqgH0QLzoZ2jQRXCZ-0_eRZPpkgdozO4OQ/viewform";
+
+    const ENTRY_LONGITUD = "entry.771075934";
+    const ENTRY_LATITUD = "entry.1759578182";
+    const ENTRY_DIRECCION_COORDENADAS = "entry.1307633364";
+
+    function capturarUbicacion() {
+      const estado = document.getElementById("estado");
+      const botonFormulario = document.getElementById("botonFormulario");
+
+      botonFormulario.style.display = "none";
+      botonFormulario.href = "#";
+
+      if (!navigator.geolocation) {
+        estado.innerHTML = '<span class="error">Este navegador no permite capturar ubicación.</span>';
+        return;
+      }
+
+      estado.innerHTML = "Solicitando ubicación. Acepta el permiso del navegador...";
+
+      navigator.geolocation.getCurrentPosition(
+        function(posicion) {
+          const lat = posicion.coords.latitude;
+          const lng = posicion.coords.longitude;
+          const precision = posicion.coords.accuracy;
+
+          const latTexto = lat.toFixed(7);
+          const lngTexto = lng.toFixed(7);
+
+          const linkMapa = "https://www.google.com/maps?q=" + latTexto + "," + lngTexto;
+
+          const direccionCoordenadas =
+            "Coordenadas: " + latTexto + ", " + lngTexto + "\n" +
+            "Precisión aproximada: " + Math.round(precision) + " metros\n" +
+            "Mapa: " + linkMapa;
+
+          const params = new URLSearchParams();
+          params.set("usp", "pp_url");
+          params.set(ENTRY_LONGITUD, lngTexto);
+          params.set(ENTRY_LATITUD, latTexto);
+          params.set(ENTRY_DIRECCION_COORDENADAS, direccionCoordenadas);
+
+          const urlFinal = FORM_URL + "?" + params.toString();
+
+          estado.innerHTML =
+            "Ubicación capturada correctamente:<br>" +
+            "Latitud: " + latTexto + "<br>" +
+            "Longitud: " + lngTexto + "<br>" +
+            "Precisión aproximada: " + Math.round(precision) + " metros<br><br>" +
+            "Abriendo formulario...";
+
+          botonFormulario.href = urlFinal;
+          botonFormulario.style.display = "block";
+
+          setTimeout(function() {
+            window.location.href = urlFinal;
+          }, 800);
+        },
+        function(error) {
+          let mensaje = "";
+
+          if (error.code === 1) {
+            mensaje = "Permiso de ubicación denegado.";
+          } else if (error.code === 2) {
+            mensaje = "La ubicación no está disponible.";
+          } else if (error.code === 3) {
+            mensaje = "Tiempo agotado al intentar obtener la ubicación.";
+          } else {
+            mensaje = "Error desconocido al obtener la ubicación.";
+          }
+
+          estado.innerHTML =
+            '<span class="error">' + mensaje + "</span><br><br>" +
+            "Activa el GPS, permite la ubicación en Safari/Chrome y vuelve a intentar.";
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 20000,
+          maximumAge: 0
+        }
+      );
+    }
+  </script>
+</body>
+</html>
