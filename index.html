@@ -118,6 +118,18 @@
       botonCaptura.innerText = "Capturar ubicación y abrir formulario";
     }
 
+    function gm_authFailure() {
+      const estado = document.getElementById("estado");
+      const botonCaptura = document.getElementById("botonCaptura");
+
+      botonCaptura.disabled = true;
+      botonCaptura.innerText = "Error en Google Maps";
+
+      estado.innerHTML =
+        '<span class="error">Error de autenticación con Google Maps.</span><br><br>' +
+        "Revisa la API Key, las restricciones del sitio web, la facturación y las APIs habilitadas.";
+    }
+
     function capturarUbicacion() {
       const estado = document.getElementById("estado");
       const botonFormulario = document.getElementById("botonFormulario");
@@ -208,28 +220,48 @@
             return;
           }
 
-          const resultado = seleccionarMejorResultado(results);
+          const resultadoDireccion = seleccionarMejorDireccion(results);
 
-          const direccion = resultado.formatted_address || "";
-          const componentes = resultado.address_components || [];
+          const direccionOriginal = resultadoDireccion.formatted_address || "";
 
-          const provincia = obtenerComponente(componentes, [
+          const provinciaOriginal = obtenerComponenteEnResultados(results, [
             "administrative_area_level_1"
           ]);
 
-          const ciudad = obtenerComponente(componentes, [
-            "locality",
+          /*
+            Para Ecuador suele ser mejor tomar primero administrative_area_level_2
+            como ciudad/canton. Si no existe, se toma locality.
+          */
+          const ciudadOriginal = obtenerComponenteEnResultados(results, [
             "administrative_area_level_2",
-            "administrative_area_level_3"
+            "locality"
           ]);
 
-          const parroquiaSector = obtenerComponente(componentes, [
-            "administrative_area_level_3",
-            "sublocality",
-            "sublocality_level_1",
-            "sublocality_level_2",
-            "neighborhood"
-          ]);
+          /*
+            Para parroquia/sector buscamos primero locality y luego niveles menores.
+            Esto permite que zonas como Llacao puedan llenarse como parroquia/sector,
+            aunque Google también las devuelva como localidad.
+          */
+          const parroquiaSectorOriginal = obtenerComponenteEnResultados(
+            results,
+            [
+              "locality",
+              "administrative_area_level_3",
+              "sublocality_level_1",
+              "sublocality_level_2",
+              "sublocality",
+              "neighborhood"
+            ],
+            [
+              provinciaOriginal,
+              "Ecuador"
+            ]
+          );
+
+          const direccion = limpiarTextoRegistro(direccionOriginal);
+          const provincia = limpiarTextoRegistro(provinciaOriginal);
+          const ciudad = limpiarTextoRegistro(ciudadOriginal);
+          const parroquiaSector = limpiarTextoRegistro(parroquiaSectorOriginal);
 
           abrirFormulario(
             latTexto,
@@ -243,31 +275,35 @@
       );
     }
 
-    function seleccionarMejorResultado(results) {
+    function seleccionarMejorDireccion(results) {
+      const tiposPreferidos = [
+        "street_address",
+        "premise",
+        "establishment",
+        "route",
+        "intersection"
+      ];
+
       for (let i = 0; i < results.length; i++) {
-        const componentes = results[i].address_components || [];
+        const tipos = results[i].types || [];
 
-        const tieneProvincia = existeTipo(componentes, "administrative_area_level_1");
-
-        const tieneCiudad =
-          existeTipo(componentes, "locality") ||
-          existeTipo(componentes, "administrative_area_level_2") ||
-          existeTipo(componentes, "administrative_area_level_3");
-
-        const tieneParroquiaSector =
-          existeTipo(componentes, "administrative_area_level_3") ||
-          existeTipo(componentes, "sublocality") ||
-          existeTipo(componentes, "sublocality_level_1") ||
-          existeTipo(componentes, "sublocality_level_2") ||
-          existeTipo(componentes, "neighborhood");
-
-        if (results[i].formatted_address && tieneProvincia && tieneCiudad && tieneParroquiaSector) {
-          return results[i];
+        for (let j = 0; j < tiposPreferidos.length; j++) {
+          if (tipos.indexOf(tiposPreferidos[j]) !== -1 && results[i].formatted_address) {
+            return results[i];
+          }
         }
       }
 
+      /*
+        Evita usar plus_code como primera opción cuando exista una dirección mejor.
+      */
       for (let i = 0; i < results.length; i++) {
-        if (results[i].formatted_address) {
+        const tipos = results[i].types || [];
+
+        if (
+          tipos.indexOf("plus_code") === -1 &&
+          results[i].formatted_address
+        ) {
           return results[i];
         }
       }
@@ -275,26 +311,42 @@
       return results[0];
     }
 
-    function existeTipo(componentes, tipoBuscado) {
-      for (let i = 0; i < componentes.length; i++) {
-        if (componentes[i].types && componentes[i].types.indexOf(tipoBuscado) !== -1) {
-          return true;
-        }
-      }
+    function obtenerComponenteEnResultados(results, tiposBuscados, valoresExcluir = []) {
+      for (let r = 0; r < results.length; r++) {
+        const componentes = results[r].address_components || [];
 
-      return false;
-    }
+        for (let i = 0; i < componentes.length; i++) {
+          const tipos = componentes[i].types || [];
 
-    function obtenerComponente(componentes, tiposBuscados) {
-      for (let i = 0; i < componentes.length; i++) {
-        for (let j = 0; j < tiposBuscados.length; j++) {
-          if (componentes[i].types && componentes[i].types.indexOf(tiposBuscados[j]) !== -1) {
-            return componentes[i].long_name || "";
+          for (let j = 0; j < tiposBuscados.length; j++) {
+            if (tipos.indexOf(tiposBuscados[j]) !== -1) {
+              const valor = componentes[i].long_name || "";
+
+              if (
+                valor &&
+                valoresExcluir.indexOf(valor) === -1
+              ) {
+                return valor;
+              }
+            }
           }
         }
       }
 
       return "";
+    }
+
+    function limpiarTextoRegistro(texto) {
+      if (!texto) return "";
+
+      return texto
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/ñ/g, "n")
+        .replace(/Ñ/g, "N")
+        .replace(/[^A-Za-z0-9 .-]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
     }
 
     function abrirFormulario(latTexto, lngTexto, direccion, provincia, ciudad, parroquiaSector) {
@@ -306,19 +358,19 @@
       params.set("usp", "pp_url");
       params.set(ENTRY_LONGITUD, lngTexto);
       params.set(ENTRY_LATITUD, latTexto);
-      params.set(ENTRY_DIRECCION, direccion);
-      params.set(ENTRY_PROVINCIA, provincia);
-      params.set(ENTRY_CIUDAD, ciudad);
-      params.set(ENTRY_PARROQUIA_SECTOR, parroquiaSector);
+      params.set(ENTRY_DIRECCION, direccion || "No identificada");
+      params.set(ENTRY_PROVINCIA, provincia || "No identificada");
+      params.set(ENTRY_CIUDAD, ciudad || "No identificada");
+      params.set(ENTRY_PARROQUIA_SECTOR, parroquiaSector || "No identificada");
 
       const urlFinal = FORM_URL + "?" + params.toString();
 
       estado.innerHTML =
         "Datos obtenidos correctamente:<br>" +
-        "Dirección: " + (direccion || "No encontrada") + "<br>" +
-        "Provincia: " + (provincia || "No encontrada") + "<br>" +
-        "Ciudad: " + (ciudad || "No encontrada") + "<br>" +
-        "Parroquia / Sector: " + (parroquiaSector || "No encontrada") + "<br><br>" +
+        "Dirección: " + (direccion || "No identificada") + "<br>" +
+        "Provincia: " + (provincia || "No identificada") + "<br>" +
+        "Ciudad: " + (ciudad || "No identificada") + "<br>" +
+        "Parroquia / Sector: " + (parroquiaSector || "No identificada") + "<br><br>" +
         "Abriendo formulario...";
 
       botonFormulario.href = urlFinal;
@@ -337,4 +389,3 @@
   </script>
 </body>
 </html>
-
