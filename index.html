@@ -42,6 +42,11 @@
       margin-top: 16px;
     }
 
+    button:disabled {
+      background: #9aa0a6;
+      cursor: not-allowed;
+    }
+
     a.boton {
       background: #188038;
     }
@@ -71,11 +76,11 @@
 
     <p>
       Presiona el botón para capturar la ubicación del cliente.
-      Luego se abrirá el formulario con longitud, latitud y coordenadas ya llenas.
+      Luego se abrirá el formulario con longitud, latitud, dirección, provincia y ciudad ya llenas.
     </p>
 
-    <button onclick="capturarUbicacion()">
-      Capturar ubicación y abrir formulario
+    <button id="botonCaptura" onclick="capturarUbicacion()" disabled>
+      Cargando Google Maps...
     </button>
 
     <div id="estado" class="estado"></div>
@@ -97,7 +102,19 @@
 
     const ENTRY_LONGITUD = "entry.771075934";
     const ENTRY_LATITUD = "entry.1759578182";
-    const ENTRY_DIRECCION_COORDENADAS = "entry.1307633364";
+    const ENTRY_DIRECCION = "entry.1307633364";
+    const ENTRY_PROVINCIA = "entry.398052092";
+    const ENTRY_CIUDAD = "entry.1982114114";
+
+    let geocoder = null;
+
+    function initGoogleMaps() {
+      geocoder = new google.maps.Geocoder();
+
+      const botonCaptura = document.getElementById("botonCaptura");
+      botonCaptura.disabled = false;
+      botonCaptura.innerText = "Capturar ubicación y abrir formulario";
+    }
 
     function capturarUbicacion() {
       const estado = document.getElementById("estado");
@@ -111,45 +128,30 @@
         return;
       }
 
+      if (!geocoder) {
+        estado.innerHTML = '<span class="error">Google Maps todavía no está listo. Espera unos segundos e intenta nuevamente.</span>';
+        return;
+      }
+
       estado.innerHTML = "Solicitando ubicación. Acepta el permiso del navegador...";
 
       navigator.geolocation.getCurrentPosition(
         function(posicion) {
           const lat = posicion.coords.latitude;
           const lng = posicion.coords.longitude;
-          const precision = posicion.coords.accuracy;
+          const precision = Math.round(posicion.coords.accuracy);
 
           const latTexto = lat.toFixed(7);
           const lngTexto = lng.toFixed(7);
 
-          const linkMapa = "https://www.google.com/maps?q=" + latTexto + "," + lngTexto;
-
-          const direccionCoordenadas =
-            "Coordenadas: " + latTexto + ", " + lngTexto + "\n" +
-            "Precisión aproximada: " + Math.round(precision) + " metros\n" +
-            "Mapa: " + linkMapa;
-
-          const params = new URLSearchParams();
-          params.set("usp", "pp_url");
-          params.set(ENTRY_LONGITUD, lngTexto);
-          params.set(ENTRY_LATITUD, latTexto);
-          params.set(ENTRY_DIRECCION_COORDENADAS, direccionCoordenadas);
-
-          const urlFinal = FORM_URL + "?" + params.toString();
-
           estado.innerHTML =
-            "Ubicación capturada correctamente:<br>" +
+            "Ubicación capturada correctamente.<br>" +
             "Latitud: " + latTexto + "<br>" +
             "Longitud: " + lngTexto + "<br>" +
-            "Precisión aproximada: " + Math.round(precision) + " metros<br><br>" +
-            "Abriendo formulario...";
+            "Precisión aproximada: " + precision + " metros<br><br>" +
+            "Consultando dirección en Google Maps...";
 
-          botonFormulario.href = urlFinal;
-          botonFormulario.style.display = "block";
-
-          setTimeout(function() {
-            window.location.href = urlFinal;
-          }, 800);
+          obtenerDireccionGoogleMaps(lat, lng, latTexto, lngTexto);
         },
         function(error) {
           let mensaje = "";
@@ -175,6 +177,92 @@
         }
       );
     }
+
+    function obtenerDireccionGoogleMaps(lat, lng, latTexto, lngTexto) {
+      const estado = document.getElementById("estado");
+
+      geocoder.geocode(
+        {
+          location: {
+            lat: lat,
+            lng: lng
+          },
+          region: "EC",
+          language: "es"
+        },
+        function(results, status) {
+          if (status === "OK" && results && results.length > 0) {
+            const mejorResultado = results[0];
+
+            const direccion = mejorResultado.formatted_address || "";
+            const componentes = mejorResultado.address_components || [];
+
+            const provincia = obtenerComponente(componentes, "administrative_area_level_1");
+
+            const ciudad =
+              obtenerComponente(componentes, "locality") ||
+              obtenerComponente(componentes, "administrative_area_level_2") ||
+              obtenerComponente(componentes, "administrative_area_level_3") ||
+              obtenerComponente(componentes, "sublocality") ||
+              "";
+
+            abrirFormulario(latTexto, lngTexto, direccion, provincia, ciudad);
+          } else {
+            estado.innerHTML =
+              '<span class="error">No se pudo obtener la dirección desde Google Maps.</span><br><br>' +
+              "Se abrirá el formulario solo con latitud y longitud.";
+
+            abrirFormulario(latTexto, lngTexto, "", "", "");
+          }
+        }
+      );
+    }
+
+    function obtenerComponente(componentes, tipoBuscado) {
+      for (let i = 0; i < componentes.length; i++) {
+        if (componentes[i].types && componentes[i].types.indexOf(tipoBuscado) !== -1) {
+          return componentes[i].long_name;
+        }
+      }
+
+      return "";
+    }
+
+    function abrirFormulario(latTexto, lngTexto, direccion, provincia, ciudad) {
+      const estado = document.getElementById("estado");
+      const botonFormulario = document.getElementById("botonFormulario");
+
+      const params = new URLSearchParams();
+
+      params.set("usp", "pp_url");
+      params.set(ENTRY_LONGITUD, lngTexto);
+      params.set(ENTRY_LATITUD, latTexto);
+      params.set(ENTRY_DIRECCION, direccion);
+      params.set(ENTRY_PROVINCIA, provincia);
+      params.set(ENTRY_CIUDAD, ciudad);
+
+      const urlFinal = FORM_URL + "?" + params.toString();
+
+      estado.innerHTML =
+        "Datos obtenidos correctamente:<br>" +
+        "Dirección: " + (direccion || "No encontrada") + "<br>" +
+        "Provincia: " + (provincia || "No encontrada") + "<br>" +
+        "Ciudad: " + (ciudad || "No encontrada") + "<br><br>" +
+        "Abriendo formulario...";
+
+      botonFormulario.href = urlFinal;
+      botonFormulario.style.display = "block";
+
+      setTimeout(function() {
+        window.location.href = urlFinal;
+      }, 1000);
+    }
+  </script>
+
+  <script
+    async
+    defer
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAdb2nCetDQzYiP7LHmvC7myILt6JlLvNA&callback=initGoogleMaps&language=es&region=EC">
   </script>
 </body>
 </html>
