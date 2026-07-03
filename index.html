@@ -76,7 +76,8 @@
 
     <p>
       Presiona el botón para capturar la ubicación del cliente.
-      Luego se abrirá el formulario con longitud, latitud, dirección, provincia y ciudad ya llenas.
+      Luego se abrirá el formulario con longitud, latitud, dirección, provincia,
+      ciudad y parroquia/sector ya llenos.
     </p>
 
     <button id="botonCaptura" onclick="capturarUbicacion()" disabled>
@@ -105,6 +106,7 @@
     const ENTRY_DIRECCION = "entry.1307633364";
     const ENTRY_PROVINCIA = "entry.398052092";
     const ENTRY_CIUDAD = "entry.1982114114";
+    const ENTRY_PARROQUIA_SECTOR = "entry.1654615664";
 
     let geocoder = null;
 
@@ -184,51 +186,118 @@
       geocoder.geocode(
         {
           location: {
-            lat: lat,
-            lng: lng
+            lat: Number(lat),
+            lng: Number(lng)
           },
-          region: "EC",
-          language: "es"
+          region: "EC"
         },
         function(results, status) {
-          if (status === "OK" && results && results.length > 0) {
-            const mejorResultado = results[0];
-
-            const direccion = mejorResultado.formatted_address || "";
-            const componentes = mejorResultado.address_components || [];
-
-            const provincia = obtenerComponente(componentes, "administrative_area_level_1");
-
-            const ciudad =
-              obtenerComponente(componentes, "locality") ||
-              obtenerComponente(componentes, "administrative_area_level_2") ||
-              obtenerComponente(componentes, "administrative_area_level_3") ||
-              obtenerComponente(componentes, "sublocality") ||
-              "";
-
-            abrirFormulario(latTexto, lngTexto, direccion, provincia, ciudad);
-          } else {
+          if (status !== "OK") {
             estado.innerHTML =
-              '<span class="error">No se pudo obtener la dirección desde Google Maps.</span><br><br>' +
-              "Se abrirá el formulario solo con latitud y longitud.";
+              '<span class="error">Google Maps no devolvió dirección.</span><br><br>' +
+              "Estado devuelto: <b>" + status + "</b><br><br>" +
+              "Si el estado es REQUEST_DENIED, revisa la API Key, facturación, restricciones y APIs habilitadas.<br>" +
+              "Si el estado es ZERO_RESULTS, Google no encontró dirección para esas coordenadas.";
 
-            abrirFormulario(latTexto, lngTexto, "", "", "");
+            return;
           }
+
+          if (!results || results.length === 0) {
+            estado.innerHTML =
+              '<span class="error">Google Maps respondió OK, pero no devolvió resultados.</span>';
+            return;
+          }
+
+          const resultado = seleccionarMejorResultado(results);
+
+          const direccion = resultado.formatted_address || "";
+          const componentes = resultado.address_components || [];
+
+          const provincia = obtenerComponente(componentes, [
+            "administrative_area_level_1"
+          ]);
+
+          const ciudad = obtenerComponente(componentes, [
+            "locality",
+            "administrative_area_level_2",
+            "administrative_area_level_3"
+          ]);
+
+          const parroquiaSector = obtenerComponente(componentes, [
+            "administrative_area_level_3",
+            "sublocality",
+            "sublocality_level_1",
+            "sublocality_level_2",
+            "neighborhood"
+          ]);
+
+          abrirFormulario(
+            latTexto,
+            lngTexto,
+            direccion,
+            provincia,
+            ciudad,
+            parroquiaSector
+          );
         }
       );
     }
 
-    function obtenerComponente(componentes, tipoBuscado) {
+    function seleccionarMejorResultado(results) {
+      for (let i = 0; i < results.length; i++) {
+        const componentes = results[i].address_components || [];
+
+        const tieneProvincia = existeTipo(componentes, "administrative_area_level_1");
+
+        const tieneCiudad =
+          existeTipo(componentes, "locality") ||
+          existeTipo(componentes, "administrative_area_level_2") ||
+          existeTipo(componentes, "administrative_area_level_3");
+
+        const tieneParroquiaSector =
+          existeTipo(componentes, "administrative_area_level_3") ||
+          existeTipo(componentes, "sublocality") ||
+          existeTipo(componentes, "sublocality_level_1") ||
+          existeTipo(componentes, "sublocality_level_2") ||
+          existeTipo(componentes, "neighborhood");
+
+        if (results[i].formatted_address && tieneProvincia && tieneCiudad && tieneParroquiaSector) {
+          return results[i];
+        }
+      }
+
+      for (let i = 0; i < results.length; i++) {
+        if (results[i].formatted_address) {
+          return results[i];
+        }
+      }
+
+      return results[0];
+    }
+
+    function existeTipo(componentes, tipoBuscado) {
       for (let i = 0; i < componentes.length; i++) {
         if (componentes[i].types && componentes[i].types.indexOf(tipoBuscado) !== -1) {
-          return componentes[i].long_name;
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    function obtenerComponente(componentes, tiposBuscados) {
+      for (let i = 0; i < componentes.length; i++) {
+        for (let j = 0; j < tiposBuscados.length; j++) {
+          if (componentes[i].types && componentes[i].types.indexOf(tiposBuscados[j]) !== -1) {
+            return componentes[i].long_name || "";
+          }
         }
       }
 
       return "";
     }
 
-    function abrirFormulario(latTexto, lngTexto, direccion, provincia, ciudad) {
+    function abrirFormulario(latTexto, lngTexto, direccion, provincia, ciudad, parroquiaSector) {
       const estado = document.getElementById("estado");
       const botonFormulario = document.getElementById("botonFormulario");
 
@@ -240,6 +309,7 @@
       params.set(ENTRY_DIRECCION, direccion);
       params.set(ENTRY_PROVINCIA, provincia);
       params.set(ENTRY_CIUDAD, ciudad);
+      params.set(ENTRY_PARROQUIA_SECTOR, parroquiaSector);
 
       const urlFinal = FORM_URL + "?" + params.toString();
 
@@ -247,7 +317,8 @@
         "Datos obtenidos correctamente:<br>" +
         "Dirección: " + (direccion || "No encontrada") + "<br>" +
         "Provincia: " + (provincia || "No encontrada") + "<br>" +
-        "Ciudad: " + (ciudad || "No encontrada") + "<br><br>" +
+        "Ciudad: " + (ciudad || "No encontrada") + "<br>" +
+        "Parroquia / Sector: " + (parroquiaSector || "No encontrada") + "<br><br>" +
         "Abriendo formulario...";
 
       botonFormulario.href = urlFinal;
